@@ -23,9 +23,9 @@ def test_ac1_valid_ticket_returns_triage(client):
     assert triage["category"]
     assert triage["priority"]
     assert triage["team"]
-    assert triage["draft_reply"]
-    assert 0.0 <= triage["confidence"] <= 1.0
-    assert triage["model_version"] in ("v1", "v2")
+    assert body["draft_reply"]
+    assert 0.0 <= triage["model"]["confidence"] <= 1.0
+    assert triage["model"]["model_version"] in ("v1", "v2")
 
 
 def test_ac2_no_category_match_is_general_with_unmodified_confidence(client):
@@ -38,7 +38,7 @@ def test_ac2_no_category_match_is_general_with_unmodified_confidence(client):
     ).json()
     assert body["triage"]["category"] == "general"
     # the stub returns 0.44 for zero keyword hits; the endpoint must not round it up
-    assert body["triage"]["confidence"] < 0.5
+    assert body["triage"]["model"]["confidence"] < 0.5
 
 
 def test_ac3_low_confidence_sets_needs_human_attention(client, monkeypatch):
@@ -48,7 +48,7 @@ def test_ac3_low_confidence_sets_needs_human_attention(client, monkeypatch):
         "/tickets",
         json={"subject": "Something is wrong", "body": "It is just broken."},
     ).json()
-    assert body["triage"]["confidence"] < 0.5
+    assert body["triage"]["model"]["confidence"] < 0.5
     assert body["needs_human_attention"] is True
 
 
@@ -60,7 +60,7 @@ def test_ac3_high_confidence_does_not_set_needs_human_attention(client):
             "body": "I was billed twice for my September membership. Please refund one.",
         },
     ).json()
-    assert body["triage"]["confidence"] >= 0.5
+    assert body["triage"]["model"]["confidence"] >= 0.5
     assert body["needs_human_attention"] is False
 
 
@@ -123,14 +123,14 @@ def test_ac7_approve_keeps_the_models_draft_reply(client):
         "/tickets",
         json={"subject": "Cannot log in", "body": "My password stopped working."},
     ).json()
-    original_reply = created["triage"]["draft_reply"]
+    original_reply = created["draft_reply"]
     r = client.post(
         f"/tickets/{created['id']}/review", json={"decision": "approve"}
     )
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "approved"
-    assert body["triage"]["draft_reply"] == original_reply
+    assert body["draft_reply"] == original_reply
 
 
 def test_ac7_edit_replaces_the_draft_reply(client):
@@ -145,7 +145,7 @@ def test_ac7_edit_replaces_the_draft_reply(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "approved"
-    assert body["triage"]["draft_reply"] == "A human-written reply."
+    assert body["draft_reply"] == "A human-written reply."
 
 
 def test_ac8_reject_clears_the_draft_reply(client):
@@ -157,7 +157,7 @@ def test_ac8_reject_clears_the_draft_reply(client):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "rejected"
-    assert body["triage"]["draft_reply"] is None
+    assert body["draft_reply"] is None
 
     fetched = client.get(f"/tickets/{created['id']}").json()
     assert fetched["status"] == "rejected"
@@ -217,5 +217,93 @@ def test_ac11_filter_by_category_returns_only_matching_tickets(client):
 
 def test_ac12_filter_matching_nothing_returns_empty_page(client):
     body = client.get("/tickets", params={"category": "outage"}).json()
+    assert body["items"] == []
+    assert body["total"] == 0
+
+def test_ac3_needs_attention_tickets_are_sorted_first(client, monkeypatch):
+    # a clean, high-confidence ticket first
+    client.post(
+        "/tickets",
+        json={
+            "subject": "Refund for duplicate charge",
+            "body": "I was billed twice for my September membership.",
+        },
+    )
+    # then a low-confidence one
+    monkeypatch.setenv("STUB_WRONGNESS", "1.0")
+    mc.reset_client()
+    client.post(
+        "/tickets",
+        json={"subject": "Something is wrong", "body": "It is just broken."},
+    )
+    monkeypatch.delenv("STUB_WRONGNESS", raising=False)
+    mc.reset_client()
+
+    body = client.get("/tickets").json()
+    assert body["items"][0]["needs_human_attention"] is True
+
+
+def test_ac4_both_missing_or_whitespace_is_rejected(client):
+    whitespace = client.post("/tickets", json={"subject": "   ", "body": "\n\t"})
+    assert whitespace.status_code == 422
+
+
+def test_ac4_over_length_subject_is_rejected(client):
+    r = client.post(
+        "/tickets", json={"subject": "x" * 201, "body": "A normal body."}
+    )
+    assert r.status_code == 422
+
+
+def test_ac6_normal_pending_ticket_can_still_be_approved(client):
+    """Regression guard: v1's AC6 wording accidentally 409'd every unreviewed ticket."""
+    created = client.post(
+        "/tickets",
+        json={"subject": "Cannot log in", "body": "My password stopped working."},
+    ).json()
+    r = client.post(f"/tickets/{created['id']}/review", json={"decision": "approve"})
+    assert r.status_code == 200
+
+
+def test_ac7_edit_works_even_with_no_triage(client, monkeypatch):
+    monkeypatch.setenv("STUB_FAILURE_RATE", "1.0")
+    mc.reset_client()
+    created = client.post(
+        "/tickets", json={"subject": "Site is down", "body": "Everything is broken."}
+    ).json()
+    assert created["triage"] is None
+
+    r = client.post(
+        f"/tickets/{created['id']}/review",
+        json={"decision": "edit", "draft_reply": "Manually written since triage failed."},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["draft_reply"] == "Manually written since triage failed."
+
+    fetched = client.get(f"/tickets/{created['id']}").json()
+    assert fetched["draft_reply"] == "Manually written since triage failed."
+
+
+def test_ac7_edit_with_empty_reply_is_rejected(client):
+    created = client.post(
+        "/tickets",
+        json={"subject": "Cannot log in", "body": "My password stopped working."},
+    ).json()
+    r = client.post(
+        f"/tickets/{created['id']}/review",
+        json={"decision": "edit", "draft_reply": ""},
+    )
+    assert r.status_code == 422
+
+
+def test_ac11_unknown_filter_value_returns_empty_page_not_an_error(client):
+    client.post(
+        "/tickets",
+        json={"subject": "Cannot log in", "body": "My password stopped working."},
+    )
+    r = client.get("/tickets", params={"category": "not-a-real-category"})
+    assert r.status_code == 200
+    body = r.json()
     assert body["items"] == []
     assert body["total"] == 0

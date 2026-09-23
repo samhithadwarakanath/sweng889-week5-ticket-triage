@@ -88,7 +88,7 @@ TicketStatus = Literal["pending_review", "approved", "rejected"]
 
 
 class TicketCreate(BaseModel):
-    """`POST /tickets` — see specs/spec-v1.md §5. At least one field must carry text."""
+    """`POST /tickets` — see specs/spec-v2.md §5. At least one field must carry text."""
 
     subject: str = Field(default="", max_length=200)
     body: str = Field(default="", max_length=5000)
@@ -101,14 +101,12 @@ class TicketCreate(BaseModel):
 
 
 class TicketTriage(BaseModel):
-    """What the classifier suggested. ``confidence`` is passed through unrounded."""
+    """What the classifier suggested. ``model.confidence`` is passed through unrounded."""
 
     category: str
     priority: str
     team: str
-    draft_reply: Optional[str]
-    confidence: float
-    model_version: str
+    model: ModelPayload
 
 
 class Ticket(BaseModel):
@@ -118,6 +116,7 @@ class Ticket(BaseModel):
     status: TicketStatus
     subject: str
     body: str
+    draft_reply: Optional[str]
     triage: Optional[TicketTriage]
     needs_human_attention: bool
     model_error: Optional[str]

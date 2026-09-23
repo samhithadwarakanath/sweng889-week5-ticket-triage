@@ -1,4 +1,4 @@
-"""Support ticket triage — see specs/spec-v1.md.
+"""Support ticket triage — see specs/spec-v2.md.
 
 A ticket is classified once, at creation, through the same model-calling pattern as
 ``describe_library`` in :mod:`app.routes.libraries` — except a failed classification
@@ -9,6 +9,7 @@ exactly once through :func:`review_ticket`. Nothing here sends a reply anywhere.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from typing import Optional
 
@@ -17,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app import filters
 from app.db import get_db
 from app.model_client import ModelTimeout, ModelUnavailable, get_client
-from app.models import Page, Ticket, TicketCreate, TicketReview, TicketTriage
+from app.models import ModelPayload, Page, Ticket, TicketCreate, TicketReview, TicketTriage
 from app.routes.libraries import LOW_CONFIDENCE
 
 router = APIRouter(prefix="/tickets", tags=["tickets"])
@@ -40,15 +41,19 @@ def _row_to_ticket(row: sqlite3.Row) -> Ticket:
             category=row["category"],
             priority=row["priority"],
             team=row["team"],
-            draft_reply=row["draft_reply"],
-            confidence=row["confidence"],
-            model_version=row["model_version"],
+            model=ModelPayload(
+                value=json.loads(row["model_value"]),
+                confidence=row["confidence"],
+                model_version=row["model_version"],
+                latency_ms=row["latency_ms"],
+            ),
         )
     return Ticket(
         id=row["id"],
         status=row["status"],
         subject=row["subject"],
         body=row["body"],
+        draft_reply=row["draft_reply"],
         triage=triage,
         needs_human_attention=bool(row["needs_human_attention"]),
         model_error=row["model_error"],
@@ -71,7 +76,8 @@ def create_ticket(body: TicketCreate, db: sqlite3.Connection = Depends(get_db)) 
     than storing it without a suggestion. That is a deliberate departure from the
     503/504 that ``describe_library`` returns.
     """
-    category = priority = team = draft_reply = confidence = model_version = model_error = None
+    category = priority = team = draft_reply = confidence = model_version = None
+    model_value = latency_ms = model_error = None
     try:
         result = get_client().complete(
             "classify_ticket", {"subject": body.subject, "body": body.body}
@@ -87,16 +93,17 @@ def create_ticket(body: TicketCreate, db: sqlite3.Connection = Depends(get_db)) 
         )
         # Not ModelResult.as_dict(): that rounds, and AC2 says confidence is returned as-is.
         confidence, model_version = result.confidence, result.model_version
+        model_value, latency_ms = json.dumps(value), result.latency_ms
 
     # A failed classification needs attention too (spec §5).
     needs_attention = confidence is None or confidence < LOW_CONFIDENCE
 
     cur = db.execute(
         "INSERT INTO tickets (subject, body, status, category, priority, team, draft_reply,"
-        " confidence, model_version, model_error, needs_human_attention)"
-        " VALUES (?, ?, 'pending_review', ?, ?, ?, ?, ?, ?, ?, ?)",
+        " confidence, model_version, model_value, latency_ms, model_error, needs_human_attention)"
+        " VALUES (?, ?, 'pending_review', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (body.subject, body.body, category, priority, team, draft_reply,
-         confidence, model_version, model_error, int(needs_attention)),
+         confidence, model_version, model_value, latency_ms, model_error, int(needs_attention)),
     )
     db.commit()
     return _row_to_ticket(_fetch(db, cur.lastrowid))

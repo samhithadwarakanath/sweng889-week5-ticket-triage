@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS tickets (
     draft_reply            TEXT,
     confidence             REAL,
     model_version          TEXT,
+    model_value            TEXT,
+    latency_ms             INTEGER,
     model_error            TEXT,
     needs_human_attention  INTEGER NOT NULL,
     reviewer               TEXT
