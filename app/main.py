@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.model_client import ModelError
-from app.routes import libraries, summary
+from app.routes import libraries, summary, tickets
 
 app = FastAPI(
     title="Facilities API",
@@ -26,6 +26,7 @@ app = FastAPI(
 # or the path-parameter route captures the literal path "summary" first.
 app.include_router(summary.router)
 app.include_router(libraries.router)
+app.include_router(tickets.router)
 
 
 _ERROR_CODES = {404: "not_found", 409: "conflict", 503: "model_unavailable", 504: "model_timeout"}

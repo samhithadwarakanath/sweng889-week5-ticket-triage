@@ -29,6 +29,23 @@ CREATE TABLE IF NOT EXISTS libraries (
 );
 CREATE INDEX IF NOT EXISTS idx_libraries_state ON libraries(state);
 CREATE INDEX IF NOT EXISTS idx_libraries_kind  ON libraries(kind);
+
+CREATE TABLE IF NOT EXISTS tickets (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject                TEXT    NOT NULL,
+    body                   TEXT    NOT NULL,
+    status                 TEXT    NOT NULL,
+    category               TEXT,
+    priority               TEXT,
+    team                   TEXT,
+    draft_reply            TEXT,
+    confidence             REAL,
+    model_version          TEXT,
+    model_error            TEXT,
+    needs_human_attention  INTEGER NOT NULL,
+    reviewer               TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 """
 
 

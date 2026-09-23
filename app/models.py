@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Generic, Literal, Optional, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+T = TypeVar("T")
 
 Kind = Literal["central", "branch", "bookmobile", "research"]
 
@@ -34,10 +36,10 @@ class LibraryCreate(BaseModel):
     has_makerspace: bool = False
 
 
-class Page(BaseModel):
+class Page(BaseModel, Generic[T]):
     """Every list endpoint returns this shape. Copy it for new list endpoints."""
 
-    items: list[Library]
+    items: list[T]
     total: int
     limit: int
     offset: int
@@ -80,3 +82,58 @@ class SummaryResponse(BaseModel):
     cached: bool
     model: Optional[ModelPayload]
     model_error: Optional[str]
+
+
+TicketStatus = Literal["pending_review", "approved", "rejected"]
+
+
+class TicketCreate(BaseModel):
+    """`POST /tickets` — see specs/spec-v1.md §5. At least one field must carry text."""
+
+    subject: str = Field(default="", max_length=200)
+    body: str = Field(default="", max_length=5000)
+
+    @model_validator(mode="after")
+    def _not_both_empty(self) -> "TicketCreate":
+        if not self.subject.strip() and not self.body.strip():
+            raise ValueError("a ticket needs a subject or a body")
+        return self
+
+
+class TicketTriage(BaseModel):
+    """What the classifier suggested. ``confidence`` is passed through unrounded."""
+
+    category: str
+    priority: str
+    team: str
+    draft_reply: Optional[str]
+    confidence: float
+    model_version: str
+
+
+class Ticket(BaseModel):
+    """A support ticket queued for a human decision."""
+
+    id: int
+    status: TicketStatus
+    subject: str
+    body: str
+    triage: Optional[TicketTriage]
+    needs_human_attention: bool
+    model_error: Optional[str]
+
+
+class TicketReview(BaseModel):
+    """`POST /tickets/{id}/review` — a human's one decision on a queued ticket."""
+
+    decision: Literal["approve", "edit", "reject"]
+    draft_reply: Optional[str] = Field(default=None, min_length=1)
+    reviewer: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _draft_reply_only_on_edit(self) -> "TicketReview":
+        if self.decision == "edit" and self.draft_reply is None:
+            raise ValueError("decision 'edit' needs a draft_reply")
+        if self.decision != "edit" and self.draft_reply is not None:
+            raise ValueError(f"draft_reply is only accepted with decision 'edit', not {self.decision!r}")
+        return self

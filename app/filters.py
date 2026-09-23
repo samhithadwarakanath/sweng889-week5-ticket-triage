@@ -30,6 +30,10 @@ FILTERS: tuple[Filter, ...] = (
     Filter("founded_before", "year_founded < ?", lambda v: f"founded before {v}"),
     Filter("has_makerspace", "has_makerspace = ?", lambda v: "with a makerspace" if v else "without a makerspace"),
     Filter("q", "LOWER(name) LIKE LOWER(?)", lambda v: f"name containing {v!r}"),
+    Filter("status", "status = ?", lambda v: f"status {v}"),
+    Filter("category", "category = ?", lambda v: f"category {v}"),
+    Filter("priority", "priority = ?", lambda v: f"priority {v}"),
+    Filter("team", "team = ?", lambda v: f"team {v}"),
 )
 
 _BY_NAME = {f.name: f for f in FILTERS}

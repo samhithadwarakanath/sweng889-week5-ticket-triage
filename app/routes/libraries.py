@@ -51,13 +51,13 @@ def _query_params(
     }
 
 
-@router.get("", response_model=Page)
+@router.get("", response_model=Page[Library])
 def list_libraries(
     params: dict = Depends(_query_params),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: sqlite3.Connection = Depends(get_db),
-) -> Page:
+) -> Page[Library]:
     """List facilities, filtered. This is the endpoint the summary feature sits beside."""
     where, args = filters.build_where(params)
     total = db.execute(f"SELECT COUNT(*) AS n FROM libraries WHERE {where}", args).fetchone()["n"]
@@ -65,7 +65,7 @@ def list_libraries(
         f"SELECT * FROM libraries WHERE {where} ORDER BY name LIMIT ? OFFSET ?",
         [*args, limit, offset],
     ).fetchall()
-    return Page(items=[Library(**r) for r in rows_to_dicts(rows)],
+    return Page[Library](items=[Library(**r) for r in rows_to_dicts(rows)],
                 total=total, limit=limit, offset=offset)
 
 
